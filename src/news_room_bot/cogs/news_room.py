@@ -9,46 +9,17 @@ import datetime
 import json
 import aiohttp
 import re
-import html 
+import html
+import nltk
+from newspaper import Article as Article3k
+from playwright.async_api import async_playwright
 
-# NLTK 데이터 자동 다운로드 (newspaper 사용 전 필수)
-try:
-    import nltk
-    nltk.data.find('tokenizers/punkt_tab')
-except LookupError:
-    print("NLTK punkt_tab 다운로드 중...")
-    import nltk
-    nltk.download('punkt_tab', quiet=True)
-    nltk.download('punkt', quiet=True)
-    print("✓ NLTK 데이터 다운로드 완료")
-except ImportError:
-    pass  # NLTK가 설치되지 않은 경우 무시
+nltk.download('punkt_tab', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.data.find('tokenizers/punkt_tab')
 
-# newspaper4k 사용 (newspaper3k는 lxml 문제 있음)
-try:
-    from newspaper import Article as Article3k
-    NEWSPAPER_AVAILABLE = True
-    print("✓ newspaper 라이브러리 로드 성공")
-except ImportError:
-    try:
-        from newspaper4k import Article as Article3k
-        NEWSPAPER_AVAILABLE = True
-        print("✓ newspaper4k 라이브러리 로드 성공")
-    except ImportError:
-        NEWSPAPER_AVAILABLE = False
-        Article3k = None
-        print("⚠ newspaper/newspaper4k가 설치되지 않았습니다. pip install newspaper4k")
-
-# playwright 사용
-try:
-    from playwright.async_api import async_playwright
-    PLAYWRIGHT_AVAILABLE = True
-    print("✓ playwright 라이브러리 로드 성공")
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-    print("⚠ playwright가 설치되지 않았습니다. pip install playwright && playwright install chromium")
-
-warnings.filterwarnings("ignore", category=RuntimeWarning)
+NEWSPAPER_AVAILABLE = True
+PLAYWRIGHT_AVAILABLE = True
 
 def get_news_provider(news_link: str) -> str:
     """뉴스 링크에서 언론사 이름 추출"""

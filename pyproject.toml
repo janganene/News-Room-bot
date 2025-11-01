@@ -1,0 +1,33 @@
+[project]
+name = "news_room_bot"
+version = "0.0.1"
+authors = [
+  { name="janganene", email="janganene@gmail.com" },
+]
+description = "News room bot"
+readme = "README.md"
+requires-python = ">=3.13.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+dependencies = [
+    "newspaper3k==0.2.8",
+    "discord==2.3.2",
+    "google-generativeai==0.8.5",
+    "dotenv==0.9.9",
+    "playwright==1.55.0",
+    "lxml_html_clean==0.4.3"
+]
+
+
+[project.urls]
+Homepage = "https://github.com/janganene/News-Room-bot"
+Issues = "https://github.com/janganene/News-Room-bot/issues"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
