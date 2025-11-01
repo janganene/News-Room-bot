@@ -9,7 +9,7 @@ import asyncio
 # (aiohttp 임포트 제거)
 
 # .env 파일 로드
-load_dotenv()
+load_dotenv('.env')
 
 # --- Discord 봇 설정 ---
 intents = discord.Intents.default()
