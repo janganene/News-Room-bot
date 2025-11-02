@@ -11,11 +11,52 @@ import aiohttp
 import re
 import html
 import nltk
+import logging
+from logging.handlers import RotatingFileHandler
 from newspaper import Article as Article3k
 from playwright.async_api import async_playwright
 from .models import init_db, NewsHistory
 from sqlalchemy import select
 
+# 로깅 설정
+def setup_logger():
+    """로거 설정 - 파일과 콘솔에 동시 출력"""
+    logger = logging.getLogger('news_bot')
+    logger.setLevel(logging.INFO)
+    
+    # 이미 핸들러가 있으면 추가하지 않음 (중복 방지)
+    if logger.handlers:
+        return logger
+    
+    # 로그 포맷 설정
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # 파일 핸들러 (최대 10MB, 5개 백업 파일 유지)
+    file_handler = RotatingFileHandler(
+        'news_bot.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # 콘솔 핸들러
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # 핸들러 추가
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+# 로거 초기화
+logger = setup_logger()
 
 nltk.download('punkt_tab', quiet=True)
 nltk.download('punkt', quiet=True)
@@ -306,7 +347,7 @@ async def extract_article_content(url: str) -> tuple[str, str]:
     # 1단계: newspaper4k 시도
     if NEWSPAPER_AVAILABLE and Article3k is not None:
         try:
-            print(f"  -> [1단계] newspaper로 본문 추출 시도...")
+            logger.info(f"  -> [1단계] newspaper로 본문 추출 시도...")
             article = Article3k(url, language='ko')
             
             # 비동기 처리를 위해 timeout 설정
@@ -321,21 +362,21 @@ async def extract_article_content(url: str) -> tuple[str, str]:
             
             content = article.text.strip()
             if content and len(content) > 100:  # 최소 길이 확인
-                print(f"     ✓ newspaper 성공 (길이: {len(content)})")
+                logger.info(f"     ✓ newspaper 성공 (길이: {len(content)})")
                 return content, "newspaper"
             else:
-                print(f"     ✗ newspaper 추출 실패 (길이 부족: {len(content)})")
+                logger.warning(f"     ✗ newspaper 추출 실패 (길이 부족: {len(content)})")
         except asyncio.TimeoutError:
-            print(f"     ✗ newspaper 타임아웃")
+            logger.warning(f"     ✗ newspaper 타임아웃")
         except Exception as e:
-            print(f"     ✗ newspaper 오류: {e}")
+            logger.error(f"     ✗ newspaper 오류: {e}")
     else:
-        print(f"  -> [1단계] newspaper 미설치 - 건너뜀")
+        logger.info(f"  -> [1단계] newspaper 미설치 - 건너뜀")
     
     # 2단계: playwright 시도
     if PLAYWRIGHT_AVAILABLE:
         try:
-            print(f"  -> [2단계] playwright로 본문 추출 시도...")
+            logger.info(f"  -> [2단계] playwright로 본문 추출 시도...")
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
@@ -368,7 +409,7 @@ async def extract_article_content(url: str) -> tuple[str, str]:
                             text = await element.inner_text()
                             if text and len(text.strip()) > 100:
                                 content = text.strip()
-                                print(f"     ✓ playwright 성공 - 선택자: {selector} (길이: {len(content)})")
+                                logger.info(f"     ✓ playwright 성공 - 선택자: {selector} (길이: {len(content)})")
                                 break
                     except:
                         continue
@@ -378,15 +419,15 @@ async def extract_article_content(url: str) -> tuple[str, str]:
                 if content:
                     return content, "playwright"
                 else:
-                    print(f"     ✗ playwright 추출 실패 (적절한 본문을 찾지 못함)")
+                    logger.warning(f"     ✗ playwright 추출 실패 (적절한 본문을 찾지 못함)")
                     
         except Exception as e:
-            print(f"     ✗ playwright 오류: {e}")
+            logger.error(f"     ✗ playwright 오류: {e}")
     else:
-        print(f"  -> [2단계] playwright 미설치 - 건너뜀")
+        logger.info(f"  -> [2단계] playwright 미설치 - 건너뜀")
     
     # 3단계: 모두 실패
-    print(f"  -> [3단계] 모든 본문 추출 방법 실패 - API 요약본 사용")
+    logger.info(f"  -> [3단계] 모든 본문 추출 방법 실패 - API 요약본 사용")
     return None, "failed"
 
 class NewsCog(commands.Cog):
@@ -402,7 +443,7 @@ class NewsCog(commands.Cog):
             try:
                 self.CHANNEL_ID = int(self.CHANNEL_ID_STR)
             except ValueError:
-                print(f"오류: DISCORD_CHANNEL_ID가 올바른 숫자 형식이 아닙니다. (값: {self.CHANNEL_ID_STR})")
+                logger.error(f"오류: DISCORD_CHANNEL_ID가 올바른 숫자 형식이 아닙니다. (값: {self.CHANNEL_ID_STR})")
                 return
         
         # JSON 파일 관련 코드 제거
@@ -425,10 +466,10 @@ class NewsCog(commands.Cog):
         try:
             genai.configure(api_key=self.GEMINI_API_KEY)
             model = genai.GenerativeModel('gemini-2.5-flash')
-            print("✓ Gemini 2.5 Flash 모델 초기화 완료.")
+            logger.info("✓ Gemini 2.5 Flash 모델 초기화 완료.")
             return model
         except Exception as e:
-            print(f"✗ Gemini 모델 초기화 오류: {e}")
+            logger.error(f"✗ Gemini 모델 초기화 오류: {e}")
             return None
         
     async def _init_database(self):
@@ -441,9 +482,9 @@ class NewsCog(commands.Cog):
             async with self.db_session_maker() as session:
                 result = await session.execute(select(NewsHistory))
                 count = len(result.scalars().all())
-                print(f"✓ 데이터베이스 초기화 완료. (총 {count}개 레코드)")
+                logger.info(f"✓ 데이터베이스 초기화 완료. (총 {count}개 레코드)")
         except Exception as e:
-            print(f"데이터베이스 초기화 오류: {e}")
+            logger.error(f"데이터베이스 초기화 오류: {e}")
 
     # URL 확인 메서드 (새로 추가)
     async def _is_url_sent(self, url: str) -> bool:
@@ -489,10 +530,10 @@ class NewsCog(commands.Cog):
                         return data.get("items", [])
                     else:
                         error_text = await response.text()
-                        print(f"네이버 API 오류 발생: Status {response.status}, Error: {error_text}")
+                        logger.error(f"네이버 API 오류 발생: Status {response.status}, Error: {error_text}")
                         return []
             except Exception as e:
-                print(f"네이버 API 요청 중 오류 발생: {e}")
+                logger.error(f"네이버 API 요청 중 오류 발생: {e}")
                 return []
 
     async def summarize_with_ai(self, title, content):
@@ -559,43 +600,44 @@ class NewsCog(commands.Cog):
             return summary
             
         except asyncio.TimeoutError:
-            print("AI 요약 요청 시간 초과 (TimeoutError)")
+            logger.error("AI 요약 요청 시간 초과 (TimeoutError)")
             return f"오류: AI 요약 요청 시간 초과. 원문은 {title}."
         except Exception as e:
-            print(f"AI 요약 처리 중 오류: {e}")
+            logger.error(f"AI 요약 처리 중 오류: {e}")
             return None
 
     async def cog_load(self):
         """Cog가 로드될 때 실행"""
         if self.CHANNEL_ID:
             self.send_news_loop.start()
-            print("✓ 뉴스 자동 전송 루프 시작.")
+            logger.info("✓ 뉴스 자동 전송 루프 시작.")
         else:
-            print("경고: DISCORD_CHANNEL_ID가 없어 자동 전송 루프를 시작하지 않습니다.")
+            logger.warning("경고: DISCORD_CHANNEL_ID가 없어 자동 전송 루프를 시작하지 않습니다.")
 
     async def cog_unload(self):
         """Cog가 언로드될 때 실행"""
         self.send_news_loop.stop()
+        logger.info("뉴스 자동 전송 루프 중지.")
 
     @tasks.loop(minutes=30.0)
     async def send_news_loop(self):
         """120분마다 최신 뉴스를 확인하고 채널에 전송"""
         await self.bot.wait_until_ready()
-        print("\n--- 뉴스 자동 업데이트 시작 ---")
+        logger.info("\n--- 뉴스 자동 업데이트 시작 ---")
         try:
             await self.fetch_and_send_news()
         except Exception as e:
-            print(f"자동 업데이트 루프 중 치명적 오류 발생: {e}")
+            logger.error(f"자동 업데이트 루프 중 치명적 오류 발생: {e}", exc_info=True)
             
     async def fetch_and_send_news(self):
         """새 IT 기사를 찾아 AI 요약 후 새 메시지로 전송 또는 기존 메시지 수정"""
         if not self.NAVER_CLIENT_ID or not self.NAVER_CLIENT_SECRET or not self.CHANNEL_ID:
-            print("환경 변수(NAVER ID/SECRET/CHANNEL_ID) 미설정. 업데이트 중단.")
+            logger.error("환경 변수(NAVER ID/SECRET/CHANNEL_ID) 미설정. 업데이트 중단.")
             return
 
         news_items = await self.fetch_naver_news(query="IT 기술 소프트웨어 인공지능", display=10)
         if not news_items:
-            print("새로운 IT 뉴스를 찾지 못했습니다. 다음 루프 대기.")
+            logger.info("새로운 IT 뉴스를 찾지 못했습니다. 다음 루프 대기.")
             return
 
         for item in news_items:
@@ -613,10 +655,10 @@ class NewsCog(commands.Cog):
             
             # 이미 전송된 뉴스인지 확인 (DB 조회)
             if await self._is_url_sent(news_url):
-                print(f"  -> 이미 전송된 기사. 건너뜀: {news_provider} - {news_title}")
+                logger.info(f"  -> 이미 전송된 기사. 건너뜀: {news_provider} - {news_title}")
                 continue
 
-            print(f"→ 새 기사 발견: {news_provider} - {news_title[:60]}...")
+            logger.info(f"→ 새 기사 발견: {news_provider} - {news_title[:60]}...")
             
             # 본문 추출 시도
             content_to_summarize, extraction_method = await extract_article_content(news_url)
@@ -624,18 +666,18 @@ class NewsCog(commands.Cog):
             if not content_to_summarize:
                 content_to_summarize = re.sub('<[^<]+?>', '', news_description)
                 extraction_method = "naver_api"
-                print(f"  -> API description 사용 (길이: {len(content_to_summarize)})")
+                logger.info(f"  -> API description 사용 (길이: {len(content_to_summarize)})")
             else:
-                print(f"  -> {extraction_method} 사용 (길이: {len(content_to_summarize)})")
+                logger.info(f"  -> {extraction_method} 사용 (길이: {len(content_to_summarize)})")
 
             # IT 뉴스 필터링 (새 뉴스만)
             if not is_it_news(news_title, content_to_summarize):
-                print(f"  ✗ IT 뉴스가 아님. 건너뜀.")
+                logger.info(f"  ✗ IT 뉴스가 아님. 건너뜀.")
                 continue
 
             summary = await self.summarize_with_ai(news_title, content_to_summarize)
             if not summary or summary.startswith("오류:"):
-                print("✗ 요약 실패. 다음 기사로 넘어갑니다.")
+                logger.warning("✗ 요약 실패. 다음 기사로 넘어갑니다.")
                 continue
 
             # 대안: 제목 중복 방지 로직 추가
@@ -654,22 +696,22 @@ class NewsCog(commands.Cog):
             try:
                 channel = self.bot.get_channel(self.CHANNEL_ID)
                 if not channel:
-                    print(f"오류: 채널 ID {self.CHANNEL_ID}를 찾을 수 없습니다.")
+                    logger.error(f"오류: 채널 ID {self.CHANNEL_ID}를 찾을 수 없습니다.")
                     return
 
                 # 새 메시지 전송
                 message = await channel.send(news_text)
-                print(f"✓ 새 메시지 전송 완료 (ID: {message.id})")
+                logger.info(f"✓ 새 메시지 전송 완료 (ID: {message.id})")
                 
                 # 공지 채널인 경우 자동 발행
                 if isinstance(channel, discord.TextChannel) and channel.is_news():
                     try:
                         await message.publish()
-                        print(f"✓ 메시지 자동 발행 완료 (ID: {message.id})")
+                        logger.info(f"✓ 메시지 자동 발행 완료 (ID: {message.id})")
                     except discord.errors.Forbidden:
-                        print("⚠ 메시지 발행 권한이 없습니다.")
+                        logger.warning("⚠ 메시지 발행 권한이 없습니다.")
                     except discord.errors.HTTPException as e:
-                        print(f"⚠ 메시지 발행 실패: {e}")
+                        logger.warning(f"⚠ 메시지 발행 실패: {e}")
                 
                 # 전송 성공 후 DB에 저장
                 await self._save_sent_url(news_url, str(message.id))
@@ -678,20 +720,18 @@ class NewsCog(commands.Cog):
                 async with self.db_session_maker() as session:
                     result = await session.execute(select(NewsHistory))
                     count = len(result.scalars().all())
-                    print(f"✓ 데이터베이스 저장 완료. (총 {count}개)")
+                    logger.info(f"✓ 데이터베이스 저장 완료. (총 {count}개)")
                 
                 # 하나 처리 후 종료
                 return
             
             except discord.errors.Forbidden:
-                print(f"오류: 채널 권한 없음. (채널 ID: {self.CHANNEL_ID})")
+                logger.warning(f"오류: 채널 권한 없음. (채널 ID: {self.CHANNEL_ID})")
                 return
             except Exception as e:
-                print(f"메시지 처리 오류: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"메시지 처리 오류: {e}", exc_info=True)
 
-        print("처리할 새로운 IT 뉴스를 찾지 못했습니다.")
+        logger.info("처리할 새로운 IT 뉴스를 찾지 못했습니다.")
 
 async def setup(bot):
 
