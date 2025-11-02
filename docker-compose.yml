@@ -1,0 +1,7 @@
+services:
+  app:
+    build: .
+    image: nrbimage
+    container_name: nrbapp
+    env_file:
+      - .env
